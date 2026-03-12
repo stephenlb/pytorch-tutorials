@@ -1,11 +1,12 @@
 import os
+import sys
 import torch
 from torch import nn
 from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 import matplotlib.pyplot as plt
 import pandas as pd
-from torchvision.transforms import Lambda
+from torchvision.transforms import Lambda, ToTensor
 
 from torchvision.io import decode_image
 from torch.utils.data import DataLoader
@@ -20,9 +21,10 @@ class NN(torch.nn.Module):
         self.units = units = 512
         self.learing_rate = 0.001
         self.batch_size = 64
-        self.epochs = 5
+        self.epochs = 8
         self.loss = nn.CrossEntropyLoss()
         self.device = device
+        self.outputs = 10
 
         self.model = nn.Sequential(
             ## Parameters
@@ -30,7 +32,8 @@ class NN(torch.nn.Module):
             nn.ReLU(),
             nn.Linear(units, units),
             nn.ReLU(),
-            nn.Linear(units, 10),
+            nn.Linear(units, self.outputs),
+            #nn.Sigmoid(),
         )
 
     def forward(self, batch):
@@ -78,16 +81,27 @@ class CustomDataset(Dataset):
         if self.target_transform:
             label = self.target_transform(label)
 
-        return features, label
+        return features, torch.tensor([label], dtype=torch.float32)
 
+target_transform = Lambda(lambda y: torch.tensor([y], dtype=torch.float32))
+image_transform = Lambda(lambda x: ToTensor()(x).flatten())
 one_hot = Lambda(lambda y: torch.zeros(10, dtype=torch.float).scatter_(0, torch.tensor(y), value=1))
-image_dataset = CustomDataset(
-    './fashion-mnist/train.csv',
-    './fashion-mnist/train/',
-    target_transform=one_hot,
+#image_dataset = CustomDataset(
+#    './fashion-mnist/train.csv',
+#    './fashion-mnist/train/',
+#    #target_transform=one_hot,
+#)
+image_dataset = datasets.FashionMNIST(
+    root="data",
+    train=True,
+    download=True,
+    #transform=ToTensor(dtype=torch.float32)
+    transform=image_transform,
+    target_transform=one_hot,#target_transform,
 )
+#print(image_dataset[0])
+#sys.exit(0)
 train_dataloader = DataLoader(image_dataset, batch_size=model.batch_size, shuffle=True)
-
 
 def train(epoch):
     size = len(image_dataset)
@@ -97,9 +111,16 @@ def train(epoch):
 
         ## Get answer from model
         prediction = model(X.to(model.device))
+        #print(f'{prediction[0]} {y[0]}')
+
+        #y = torch.tensor(y, dtype=torch.float32)
+        #print('y',y)
+        #print('prediction',prediction)
+        #print(y)
+        y = y.to(model.device)
 
         ## How wrong the models predition was
-        loss = model.loss(prediction, y.to(model.device))
+        loss = model.loss(prediction, y)
 
         ## Calculage gradients (arrays that can be subtracted to our parameters (layers)  so the model can "LEARN")
         optim.zero_grad()
@@ -111,7 +132,7 @@ def train(epoch):
         ## Print progress
         if batch % 50 == 0:
             progress = f'{100. * (((size * epoch) + (batch * model.batch_size)) / total):.2f}%'
-            print(f'{loss:.5f} {progress}')
+            print(f'Loss: {loss:.5f} {progress}')
             #print(batch)
 
 ## Train for N epochs
