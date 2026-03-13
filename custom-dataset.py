@@ -19,13 +19,12 @@ class NN(torch.nn.Module):
         super().__init__()
         ## Hyperparameters
         self.units = units = 512
-        self.learing_rate = 0.001
-        self.batch_size = 64
-        self.epochs = 8
+        self.learing_rate = 0.002
+        self.batch_size = 128
+        self.epochs = 15
         self.loss = nn.CrossEntropyLoss()
         self.device = device
         self.outputs = 10
-
         self.model = nn.Sequential(
             ## Parameters
             nn.Linear(784, units),
@@ -33,14 +32,14 @@ class NN(torch.nn.Module):
             nn.Linear(units, units),
             nn.ReLU(),
             nn.Linear(units, self.outputs),
-            #nn.Sigmoid(),
+            #nn.Tanh(),
         )
 
     def forward(self, batch):
         return self.model(batch)
 
 model = NN().to(device)
-optim = torch.optim.SGD(model.parameters(), lr=model.learing_rate)
+optim = torch.optim.AdamW(model.parameters(), lr=model.learing_rate)
 
 labels_array = [
     "T-Shrit",
@@ -86,22 +85,24 @@ class CustomDataset(Dataset):
 target_transform = Lambda(lambda y: torch.tensor([y], dtype=torch.float32))
 image_transform = Lambda(lambda x: ToTensor()(x).flatten())
 one_hot = Lambda(lambda y: torch.zeros(10, dtype=torch.float).scatter_(0, torch.tensor(y), value=1))
-#image_dataset = CustomDataset(
-#    './fashion-mnist/train.csv',
-#    './fashion-mnist/train/',
-#    #target_transform=one_hot,
-#)
+
 image_dataset = datasets.FashionMNIST(
     root="data",
     train=True,
     download=True,
-    #transform=ToTensor(dtype=torch.float32)
     transform=image_transform,
-    target_transform=one_hot,#target_transform,
+    target_transform=one_hot,
 )
-#print(image_dataset[0])
-#sys.exit(0)
+test_dataset = datasets.FashionMNIST(
+    root="data",
+    train=False,
+    download=True,
+    transform=image_transform,
+    target_transform=one_hot,
+)
+
 train_dataloader = DataLoader(image_dataset, batch_size=model.batch_size, shuffle=True)
+test_dataloader = DataLoader(test_dataset, batch_size=model.batch_size, shuffle=True)
 
 def train(epoch):
     size = len(image_dataset)
@@ -111,12 +112,7 @@ def train(epoch):
 
         ## Get answer from model
         prediction = model(X.to(model.device))
-        #print(f'{prediction[0]} {y[0]}')
 
-        #y = torch.tensor(y, dtype=torch.float32)
-        #print('y',y)
-        #print('prediction',prediction)
-        #print(y)
         y = y.to(model.device)
 
         ## How wrong the models predition was
@@ -135,14 +131,54 @@ def train(epoch):
             print(f'Loss: {loss:.5f} {progress}')
             #print(batch)
 
-## Train for N epochs
-for epoch in range(model.epochs): train(epoch)
 
 
 
 
+## TODO
+## Perplexity!!!!!
+## TODO
+## (probs/probs.mean(-1)[right_labels]).mean() 
+##
+##  logsoftmax().mean().exp()
+##
+## TODO
+
+## Test the accuracy of our model
+@torch.inference_mode
+def test():
+    model.eval()
+    cost = 0 ## precision
+    correct = 0
+    incorrect = 0 
+    for X, y in test_dataloader:
+        out = model(X.to(model.device))
+        answers = out.argmax(1).cpu()
+        loss = model.loss(out, y.to(model.device)).item()
+        accuracy = answers == y.argmax(1)
+        batch_correct_answers = len(list(filter(lambda a: a, accuracy)))
+        correct += batch_correct_answers
+        incorrect += model.batch_size - batch_correct_answers
+        cost = (cost + loss) / 2
+
+    print(f'Accuracy: {100. * (correct / (correct + incorrect)):.2f}%')
+    print(f'Cost: {cost:.2f}')
 
 
+## Load model if exists, otherwise train and save
+model_file = 'fashion.pth'
+if os.path.exists(model_file):
+    model.load_state_dict(torch.load(model_file, weights_only=True))
+else:
+    ## Train for N epochs
+    for epoch in range(model.epochs): train(epoch)
+    torch.save(model.state_dict(), model_file)
+
+## Test
+test()
+
+
+        
 
 
 
