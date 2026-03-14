@@ -7,13 +7,14 @@ from torchvision import datasets, transforms
 import matplotlib.pyplot as plt
 import pandas as pd
 from torchvision.transforms import Lambda, ToTensor
-
 from torchvision.io import decode_image
 from torch.utils.data import DataLoader
 
+## GPU / TPU / CPU
 device = torch.accelerator.current_accelerator()
 print(f"Using {device} device")
 
+## Class that holds hyperparameters and model weight parameters
 class NN(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -54,6 +55,7 @@ labels_array = [
     "Ankel Boot",
 ]
 
+## We never used this even though the tutorial had it.
 """
 label_map = {
     l:labels_array[l] for l in range(len(labels_array))
@@ -82,10 +84,18 @@ class CustomDataset(Dataset):
 
         return features, torch.tensor([label], dtype=torch.float32)
 
-target_transform = Lambda(lambda y: torch.tensor([y], dtype=torch.float32))
+## Flatten 2D image to 1D array
 image_transform = Lambda(lambda x: ToTensor()(x).flatten())
+
+## Keep numbers between 0 and 1
+## 1 = [1,0,0,0,0,0,0,0,0]
+## 2 = [0,1,0,0,0,0,0,0,0]
+## ...
+## 9 = [0,0,0,0,0,0,0,0,1]
 one_hot = Lambda(lambda y: torch.zeros(10, dtype=torch.float).scatter_(0, torch.tensor(y), value=1))
 
+## Setup image data loading
+## Doesn't actually load until we call it from a dataloader
 image_dataset = datasets.FashionMNIST(
     root="data",
     train=True,
@@ -93,6 +103,7 @@ image_dataset = datasets.FashionMNIST(
     transform=image_transform,
     target_transform=one_hot,
 )
+## Test data (we only test the model on this data)
 test_dataset = datasets.FashionMNIST(
     root="data",
     train=False,
@@ -101,13 +112,20 @@ test_dataset = datasets.FashionMNIST(
     target_transform=one_hot,
 )
 
+## Loader for batching
 train_dataloader = DataLoader(image_dataset, batch_size=model.batch_size, shuffle=True)
 test_dataloader = DataLoader(test_dataset, batch_size=model.batch_size, shuffle=True)
 
 def train(epoch):
+    ## Vars for printing progress
     size = len(image_dataset)
     total = size * model.epochs
-    #model.train() # does not actually train.. instead it enables some layers and things to be ready for training.
+
+    ## Does not actually train...
+    ## Instead it enables layers (Dropout, Norms) for training.
+    model.train() 
+
+    ## Load the data into batches for faster GPU training
     for batch, (X, y) in enumerate(train_dataloader):
 
         ## Get answer from model
@@ -129,20 +147,7 @@ def train(epoch):
         if batch % 50 == 0:
             progress = f'{100. * (((size * epoch) + (batch * model.batch_size)) / total):.2f}%'
             print(f'Loss: {loss:.5f} {progress}')
-            #print(batch)
 
-
-
-
-
-## TODO
-## Perplexity!!!!!
-## TODO
-## (probs/probs.mean(-1)[right_labels]).mean() 
-##
-##  logsoftmax().mean().exp()
-##
-## TODO
 
 ## Test the accuracy of our model
 @torch.inference_mode
@@ -180,10 +185,7 @@ test()
 
         
 
-
-
-
-
+## Display some of the image data
 def testSample():
     train_features, train_labels = next(iter(train_dataloader))
     print(f'Features: {train_features.size()}')
