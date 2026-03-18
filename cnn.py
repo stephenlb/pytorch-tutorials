@@ -15,26 +15,39 @@ class LeNet(nn.Module):
         super(LeNet, self).__init__()
 
         ## Hyperparameters
-        self.batch_size = 4
-        self.epchos = 10
-        self.learning_rate = 0.002
-        self.density = density = 120
+        self.batch_size = 128
+        self.epochs = 10
+        self.learning_rate = 0.001
+        self.density = density = 256
         self.classes = ('plane', 'car', 'bird', 'cat',
                    'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
         self.num_classes = len(self.classes)
+        self.loss = nn.CrossEntropyLoss()
 
         ## Training dataset
         self.trainset = None
-        self.dataloader = None
+        self.trainloader = None
 
         ## Load data and create Transform for Vectorize to 0 and 1 range
         self.loadData()
 
-        self.conv1   = nn.Conv2d(1, 6,  5) ## b&w / 6 filters / 5x5
+        self.conv1   = nn.Conv2d(3, 6,  5) ## RGB / 6 filters / 5x5
         self.conv2   = nn.Conv2d(6, 16, 5)
         self.linear1 = nn.Linear(16*5*5,  density)
         self.linear2 = nn.Linear(density, density)
         self.linear3 = nn.Linear(density, self.num_classes)
+
+    ## Ask the AI to answer based on input
+    def forward(self, input):
+        out = F.max_pool2d(F.relu(self.conv1(input)), (2,2))
+        out = F.max_pool2d(F.relu(self.conv2(out)), (2,2))
+        out = out.view(-1, self.num_flat_features(out))
+
+        out = F.relu(self.linear1(out))
+        out = F.relu(self.linear2(out))
+        out = self.linear3(out)
+
+        return out
 
     def loadData(self):
         self.transform = transforms.Compose([
@@ -43,7 +56,12 @@ class LeNet(nn.Module):
             #std=tensor([0.2470, 0.2435, 0.2616])
             self.normVecs(),
         ])
-        self.onehot = transforms.Lambda( lambda x: torch.tensor([x==class for x in range(self.num_classes)], dtype=torch.float32))
+        #one_hot = Lambda(lambda y: torch.zeros(10, dtype=torch.float).scatter_(0, torch.tensor(y), value=1))
+        self.onehot = transforms.Lambda(
+            lambda x: torch.tensor([
+                x == label for label in range(self.num_classes)
+            ], dtype=torch.float32)
+        )
         
         ## Training Data
         self.trainset = torchvision.datasets.CIFAR10(
@@ -51,8 +69,9 @@ class LeNet(nn.Module):
             download=True,
             train=True,
             transform=self.transform,
+            target_transform=self.onehot,
         )
-        self.dataloader = torch.utils.data.DataLoader(
+        self.trainloader = torch.utils.data.DataLoader(
             self.trainset,
             batch_size=4,
             shuffle=True,
@@ -64,6 +83,7 @@ class LeNet(nn.Module):
             download=True,
             train=False,
             transform=self.transform,
+            target_transform=self.onehot,
         )
         self.testloader = torch.utils.data.DataLoader(
             self.testset,
@@ -72,12 +92,13 @@ class LeNet(nn.Module):
         )
         
     def normVecs(self):
-        transform = transforms.Compose([transforms.ToTensor(),])
+        #transform = transforms.Compose([transforms.ToTensor()])
         trainset = torchvision.datasets.CIFAR10(
             root='./data',
             download=True,
             train=True,
-            transform=transform,
+            transform=transforms.ToTensor(),
+            #dtype=torch.float32,
         )
         out  = torch.stack([s[0] for s in ConcatDataset([trainset])])
         std  = torch.std(out, dim=(0,2,3)) 
@@ -86,9 +107,11 @@ class LeNet(nn.Module):
         return transforms.Normalize(mean, std)
 
     def showImage(self):
-        iterator = iter(self.dataloader)
+        iterator = iter(self.trainloader)
         images, labels = next(iterator)
 
+        print(labels)
+        labels = torch.argmax(labels, axis=1)
         images  = torchvision.utils.make_grid(images)
         images  = images / 2 + 0.5
         npimage = images.numpy()
@@ -98,20 +121,6 @@ class LeNet(nn.Module):
         print([self.classes[l] for l in labels])
         plt.show()
 
-    def forward(self, input):
-        out = F.max_pool2d(F.relu(self.conv1(input)), (2,2))
-        out = F.max_pool2d(F.relu(self.conv2(out)), 2)
-        out = out.view(-1, self.num_flat_features(out))
-
-        out = F.relu(self.linear1(out))
-        out = F.relu(self.linear2(out))
-        out = self.linear3(out)
-
-        return out
-
-    ## "Optimization phase" train the model
-    def train(self):
-        pass
 
     def num_flat_features(self, out):
         size = out.size()[1:] ## excluding batch size
@@ -129,10 +138,41 @@ class LeNet(nn.Module):
 ##             B  C  W   H
 r = torch.rand(1, 1, 32, 32)
 lenet = LeNet()
-lenet.showImage()
+optim = torch.optim.AdamW(lenet.parameters(), lr=lenet.learning_rate)#, momentum=0.9)
+device = torch.accelerator.current_accelerator()
+
+## =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+## "Optimization phase" train the model
+## The model will begin to learn here!
+## =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+lenet.to(device)
+lenet.train()
+cost = 0.0
+losses = []
+batch = 0
+for epoch in range(lenet.epochs):
+    for images, labels in lenet.trainloader:
+        optim.zero_grad()
+        out = lenet(images.to(device))
+        loss = lenet.loss(out, labels.to(device))
+
+        ## Calculat Gradients
+        loss.backward()
+
+        ## Apply gradients to model weights
+        optim.step()
+
+        losses.append(loss)
+        #cost = (cost + loss) / 2.
+        batch += 1
+        if not(batch % 100):
+            print(f'Cost: {sum(losses)/float(len(losses)):.2f} Epoch: {epoch+1}')
+
+            
+#lenet.showImage()
 #print(r)
 #print(lenet)
-out = lenet(r)
+#out = lenet(r)
 #print(out)
 #print(lenet.transform)
 
